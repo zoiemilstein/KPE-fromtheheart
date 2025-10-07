@@ -31,7 +31,8 @@ conf_cols = [
     "a_comp_cor_03", "a_comp_cor_04", "a_comp_cor_05",
 ]
 PROJECT_ROOT = r"D:\amir_shared_folder\fmriprep_072025"
-OUTPUT_SUFFIX = "_aal_ts.csv"
+AAL_OUTPUT_SUFFIX = "_aal_ts.csv"
+SCHAEFER_OUTPUT_SUFFIX = "_schaefer100_ts.csv"
 SCRUB_REPORT_CSV = "scrubbing_report.csv"
 
 os.environ.setdefault("NILEARN_DATA", r"C:\Users\amirh\Documents\nilearn_cache")
@@ -58,6 +59,11 @@ def remove_first_n_volumes(nifti_path: str, n_vol: int) -> nib.Nifti1Image:
 def get_aal_atlas() -> Tuple[List[str], str]:
     aal = datasets.fetch_atlas_aal()
     return aal.labels, aal.maps
+
+
+def get_schaefer_atlas() -> Tuple[List[str], str]:
+    schaefer = datasets.fetch_atlas_schaefer_2018(n_rois=100, yeo_networks=7, resolution_mm=2)
+    return schaefer.labels, schaefer.maps
 
 
 class FMRIFileSet:
@@ -93,7 +99,7 @@ def discover_files(project_root: str) -> List[FMRIFileSet]:
     return file_sets
 
 
-def extract_time_series(img: nib.Nifti1Image, labels_img, labels: List[str], conf_df: pd.DataFrame) -> pd.DataFrame:
+def extract_time_series(img: nib.Nifti1Image, labels_img, labels: List[str], conf_df: pd.DataFrame, atlas_name: str = "") -> pd.DataFrame:
     masker = NiftiLabelsMasker(
         labels_img=labels_img,
         standardize=STANDARTIZE,
@@ -158,35 +164,53 @@ def build_confounds(conf_path: str, subject: str, session: str) -> pd.DataFrame:
     return conf_df
 
 
-def create_time_series(project_root: str) -> Dict[Tuple[str, str], pd.DataFrame]:
-    labels, atlas_img = get_aal_atlas()
-    time_series_dict: Dict[Tuple[str, str], pd.DataFrame] = {}
+def create_time_series(project_root: str) -> Dict[Tuple[str, str, str], pd.DataFrame]:
+    """
+    Create time series for both AAL and Schaefer atlases.
+    Returns dict with keys (subject, session, atlas_name) and DataFrame values.
+    """
+    aal_labels, aal_atlas_img = get_aal_atlas()
+    schaefer_labels, schaefer_atlas_img = get_schaefer_atlas()
+    time_series_dict: Dict[Tuple[str, str, str], pd.DataFrame] = {}
 
     for fs in discover_files(project_root):
         print(f"Processing {fs}")
         img_sliced = remove_first_n_volumes(fs.bold_path, NUM_VOLS_TO_REMOVE)
         conf_df = build_confounds(fs.confounds_path, fs.subject, fs.session)
+        
         # Check scrubbed_volumes threshold
         if scrub_stats[-1]["scrubbed_volumes"] > (scrubbed_volumes_threshold * 580):
             print(f"Skipping {fs.subject} {fs.session} due to excessive scrubbing ({scrub_stats[-1]['scrubbed_volumes']} volumes)")
             continue
-        df = extract_time_series(img_sliced, atlas_img, labels, conf_df)
+        
+        def save_time_series(img, atlas_img, labels, conf_df, atlas_name, output_suffix):
+            df = extract_time_series(img, atlas_img, labels, conf_df, atlas_name)
+            out_name = f"{fs.subject}_{fs.session}{output_suffix}"
+            df.to_csv(out_name, index=False)
+            time_series_dict[(fs.subject, fs.session, atlas_name)] = df
+            print(f"Saved {out_name} | shape={df.shape}")
+            return df
 
-        out_name = f"{fs.subject}_{fs.session}{OUTPUT_SUFFIX}"
-        df.to_csv(out_name, index=False)
-        time_series_dict[(fs.subject, fs.session)] = df
-        print(f"Saved {out_name} | shape={df.shape}")
+        # Extract and save AAL time series
+        aal_df = save_time_series(img_sliced, aal_atlas_img, aal_labels, conf_df, "aal", AAL_OUTPUT_SUFFIX)
+        # Extract and save Schaefer time series
+        schaefer_df = save_time_series(img_sliced, schaefer_atlas_img, schaefer_labels, conf_df, "schaefer", SCHAEFER_OUTPUT_SUFFIX)
 
     return time_series_dict
 
 
-def load_cached_time_series(csv_dir: str = ".") -> Dict[Tuple[str, str], pd.DataFrame]:
-    cache: Dict[Tuple[str, str], pd.DataFrame] = {}
+def load_cached_time_series(csv_dir: str = ".") -> Dict[Tuple[str, str, str], pd.DataFrame]:
+    cache: Dict[Tuple[str, str, str], pd.DataFrame] = {}
     for fname in os.listdir(csv_dir):
-        if fname.endswith(OUTPUT_SUFFIX):
-            subj, ses, *_ = fname.split("_")
+        if fname.endswith(AAL_OUTPUT_SUFFIX):
+            subj, ses, *_ = fname.replace(AAL_OUTPUT_SUFFIX, "").split("_")
             df = pd.read_csv(os.path.join(csv_dir, fname))
-            cache[(subj, ses)] = df
+            cache[(subj, ses, "aal")] = df
+            print(f"Loaded {fname} | shape={df.shape}")
+        elif fname.endswith(SCHAEFER_OUTPUT_SUFFIX):
+            subj, ses, *_ = fname.replace(SCHAEFER_OUTPUT_SUFFIX, "").split("_")
+            df = pd.read_csv(os.path.join(csv_dir, fname))
+            cache[(subj, ses, "schaefer")] = df
             print(f"Loaded {fname} | shape={df.shape}")
     return cache
 
@@ -203,7 +227,11 @@ if __name__ == "__main__":
         print("Loading cached CSV files …")
         ts_dict = load_cached_time_series()
 
-    print(f"Done. {len(ts_dict)} subject/session pairs processed.")
+    print(f"Done. {len(ts_dict)} subject/session/atlas combinations processed.")
+    
+    # Count unique subject/session pairs
+    unique_subj_ses = set((key[0], key[1]) for key in ts_dict.keys())
+    print(f"Processed {len(unique_subj_ses)} unique subject/session pairs.")
 
     if scrub_stats:
         print("\nScrubbing Summary Report:")
