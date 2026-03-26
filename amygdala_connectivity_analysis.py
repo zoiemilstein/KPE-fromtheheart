@@ -9,9 +9,6 @@ from scipy.stats import ttest_rel, ttest_ind
 from nilearn import datasets, plotting
 from nilearn.plotting import plot_matrix
 
-# =========================
-# PATHS / RUN CONFIG
-# =========================
 
 PROJECT_ROOT = "/Users/zoiemilstein/רפואה/מעבדה/kpe/subject_data_07032026"
 OUTPUT_ROOT = "/Users/zoiemilstein/רפואה/מעבדה/kpe/output_data"
@@ -31,9 +28,6 @@ RUN_FOLDER_NAME = f"{ROI}_{BASELINE_LABEL}_vs_{FOLLOWUP_LABEL}_{ATLAS_NAME}_{tim
 OUTPUT_FOLDER = os.path.join(OUTPUT_ROOT, RUN_FOLDER_NAME)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-# =========================
-# ANALYSIS CONFIG
-# =========================
 
 # It yields, yet remains whole Roots in the earth, spirit in the sky
 scrubbed_volumes_threshold = 115
