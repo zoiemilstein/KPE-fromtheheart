@@ -1,5 +1,6 @@
 import os
 import re
+from datetime import datetime
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -8,33 +9,56 @@ from scipy.stats import ttest_rel, ttest_ind
 from nilearn import datasets, plotting
 from nilearn.plotting import plot_matrix
 
-# =============================================================================
-# CONFIG
-# =============================================================================
+# =========================
+# PATHS / RUN CONFIG
+# =========================
+
+PROJECT_ROOT = "/Users/zoiemilstein/רפואה/מעבדה/kpe/subject_data_07032026"
+OUTPUT_ROOT = "/Users/zoiemilstein/רפואה/מעבדה/kpe/output_data"
+
+ROI = "amygdala"
+BASELINE_LABEL = "MRI1"     
+FOLLOWUP_LABEL = "MRI2"    
+
+AAL_PATTERN = "_aal_ts.csv"
+ATLAS_NAME = "aal"
+
+BASELINE_SESSION_KEYWORDS = (BASELINE_LABEL, BASELINE_LABEL.replace("MRI", "S"))
+FOLLOWUP_SESSION_KEYWORDS = (FOLLOWUP_LABEL, FOLLOWUP_LABEL.replace("MRI", "S"))
+
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+RUN_FOLDER_NAME = f"{ROI}_{BASELINE_LABEL}_vs_{FOLLOWUP_LABEL}_{ATLAS_NAME}_{timestamp}"
+OUTPUT_FOLDER = os.path.join(OUTPUT_ROOT, RUN_FOLDER_NAME)
+os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+
+# =========================
+# ANALYSIS CONFIG
+# =========================
+
 # It yields, yet remains whole Roots in the earth, spirit in the sky
 scrubbed_volumes_threshold = 115
-
-PROJECT_ROOT = r"C:\aaf-files"  # Folder containing *_aal_ts.csv time series
-OUTPUT_FOLDER = os.path.join(PROJECT_ROOT, "t_test_results")
-os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 # Show a matrix figure for each correlation matrix (off by default, as it can be many)
 SHOW_CORRELATION_MATRICES = False
 
 # Group table location (update if needed)
-RANDOMIZATION_XLSX_PATH = "C:/Users/amirh/Downloads/RandomizationTable.xlsx"
-report_path = "C:/AALpath/sub-987_ses-MRI1_aal_ts/scrubbing_report.csv"
+RANDOMIZATION_XLSX_PATH = "/Users/zoiemilstein/רפואה/מעבדה/kpe/RandomizationTable.xlsx"
 
-# Which sessions to compare? (substring matching, case-insensitive)
-# e.g., "MRI1" or "S1" for baseline; "MRI2" or "S2" for follow-up
-BASELINE_SESSION_KEYWORDS = ("MRI1", "S1")
-FOLLOWUP_SESSION_KEYWORDS = ("MRI2", "S2")
+# Scrubbing report (should match the run that generated the time series)
+report_path = os.path.join(PROJECT_ROOT, "scrubbing_report_filtered.csv")
 
 # Column names inside the randomization Excel
 RANDOMIZATION_SUBJECT_COLUMN = "SubID"
 RANDOMIZATION_GROUP_COLUMN = "Group_Simbol"
-KETAMINE_GROUP_SYMBOLS = ("A",)
+KETAMINE_GROUP_SYMBOLS = ("A", "B")
 CONTROL_GROUP_SYMBOLS = ("C",)
+
+# Figure context shown on plots
+FIGURE_CONTEXT = (
+    f"Sessions: {BASELINE_LABEL} vs {FOLLOWUP_LABEL} | "
+    f"Ketamine groups: {', '.join(KETAMINE_GROUP_SYMBOLS)} | "
+    f"Midazolam groups: {', '.join(CONTROL_GROUP_SYMBOLS)}"
+)
 
 # === NEW: manual control for group analysis (with auto-fallback if groups missing) ===
 ANALYZE_BY_GROUP = True
@@ -50,7 +74,11 @@ def filter_correlation_matrices_by_fd_motion_threshold(report_path, correlation_
     subject_and_session_to_delete = set(zip(over_scrubbed_volumes["subject"], over_scrubbed_volumes["session"]))
 
     def parse_subject_session(key):
-        base = os.path.basename(key).replace("_aal_ts.csv", "")
+        base = os.path.basename(key)
+        if base.endswith(AAL_PATTERN):
+            base = base[: -len(AAL_PATTERN)]
+        else:
+            base = os.path.splitext(base)[0]
         parts = base.split("_")
         return parts[0], parts[1]  # ('sub-010', 'ses-MRI1')
 
@@ -140,7 +168,7 @@ def resolve_session_labels(
 # =============================================================================
 def compute_pearson_correlations(project_root: str) -> dict:
     """
-    Create correlation matrices (Pandas DataFrame) from each *_aal_ts.csv found in project_root.
+    Create correlation matrices (Pandas DataFrame) from each AAL time-series file found in project_root.
 
     Returns:
         dict[str, pd.DataFrame]: mapping from filename -> correlation matrix
@@ -148,7 +176,7 @@ def compute_pearson_correlations(project_root: str) -> dict:
     correlation_matrices = {}
 
     for ts_file in os.listdir(project_root):
-        if not ts_file.endswith(".csv"):
+        if not ts_file.endswith(AAL_PATTERN):
             continue
         file_path = os.path.join(project_root, ts_file)
         try:
@@ -165,7 +193,7 @@ def compute_pearson_correlations(project_root: str) -> dict:
     if SHOW_CORRELATION_MATRICES:
         for filename, corr_mat in correlation_matrices.items():
             plot_matrix(corr_mat, vmax=0.8, vmin=-0.8, colorbar=True)
-            plt.title(filename, fontsize=10)
+            plt.title(f"{filename}\n{FIGURE_CONTEXT}", fontsize=9)
             plt.tight_layout()
             plt.show()
 
@@ -179,8 +207,12 @@ def extract_amygdala_correlations(correlation_matrices: dict) -> dict:
         left_amygdala_corr = corr_df.loc["Amygdala_L", :].drop("Amygdala_L")
         right_amygdala_corr = corr_df.loc["Amygdala_R", :].drop("Amygdala_R")
 
-        # Expect something like: sub-024_ses-MRI1_aal_ts.csv
-        name_without_suffix = file_name.replace("_aal_ts.csv", "")
+        # Expect something like: sub-971_ses-MRI1_task-rest_run-1_aal_ts.csv
+        name_without_suffix = file_name
+        if name_without_suffix.endswith(AAL_PATTERN):
+            name_without_suffix = name_without_suffix[: -len(AAL_PATTERN)]
+        else:
+            name_without_suffix = os.path.splitext(name_without_suffix)[0]
         name_parts = name_without_suffix.split("_")
         subject_id = name_parts[0]  # e.g., 'sub-024'
         session_label = name_parts[1]  # e.g., 'ses-MRI1'
@@ -300,6 +332,7 @@ def plot_session_changes(results_data_frame: pd.DataFrame, output_folder: str) -
 
         # Two-panel figure: t-stats and -log10 p
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8))
+        fig.suptitle(FIGURE_CONTEXT, fontsize=10, y=0.99)
 
         colors = ["red" if val > 0 else "blue" for val in seed_results["t_statistic"]]
         ax1.barh(range(len(seed_results)), seed_results["t_statistic"], color=colors, alpha=0.7)
@@ -328,7 +361,7 @@ def plot_session_changes(results_data_frame: pd.DataFrame, output_folder: str) -
         ax2.legend()
         ax2.grid(True, alpha=0.3)
 
-        plt.tight_layout()
+        plt.tight_layout(rect=[0, 0, 1, 0.95])
         figure_path = os.path.join(output_folder, f"{seed_name}_session_changes.png")
         plt.savefig(figure_path, dpi=300, bbox_inches="tight")
         plt.show()
@@ -510,7 +543,7 @@ def volcano_plot(results_data_frame: pd.DataFrame, output_folder: str) -> None:
         plt.axvline(0.0, linestyle="--")
         plt.xlabel("Mean Δ difference (ketamine − control)")
         plt.ylabel("−log10 p")
-        plt.title(f"{seed_name}: follow-up − baseline group difference")
+        plt.title(f"{seed_name}: follow-up − baseline group difference\n{FIGURE_CONTEXT}", fontsize=10)
         plt.tight_layout()
         fig_path = os.path.join(output_folder, f"volcano_{seed_name}.png")
         plt.savefig(fig_path, dpi=300, bbox_inches="tight")
@@ -561,7 +594,7 @@ def create_brain_visualization(results_data_frame: pd.DataFrame, output_folder: 
                 [r[:30] + "..." if len(r) > 30 else r for r in filtered_sorted["region"]]
             )
             ax.set_xlabel("T-Statistic")
-            ax.set_title(f"{seed_name} - Brain Regions with Connectivity Changes")
+            ax.set_title(f"{seed_name} - Brain Regions with Connectivity Changes\n{FIGURE_CONTEXT}", fontsize=10)
             ax.axvline(x=0, color="black", linestyle="--", alpha=0.5)
             ax.grid(True, alpha=0.3)
             plt.tight_layout()
@@ -576,38 +609,36 @@ def create_brain_visualization(results_data_frame: pd.DataFrame, output_folder: 
         print("This might be due to missing nilearn or atlas data")
 
 
-# =============================================================================
-# Main
-# =============================================================================
+
 def plot_between_group_top_regions(between_group_results):
     for seed_val, group_df in between_group_results.groupby("seed"):
         top_10_regions = group_df.sort_values("p_value").head(10).copy()
         colors = ["red" if diff > 0 else "blue" for diff in top_10_regions["mean_diff_(ket-control)"]]
 
-        plt.figure(figsize=(10, 6))
+        plt.figure(figsize=(12, 7))
         plt.barh(top_10_regions["region"], top_10_regions["p_value"], color=colors)
         plt.xlabel("p-value")
         plt.ylabel("Region")
-        plt.xlim(0, 0.2)  # p-values always between 0 and 1
-        plt.title(f"Top 10 Regions by Significance ({seed_val})")
-        plt.gca().invert_yaxis()  # keeps the smallest p-values at the top
+        plt.xlim(0, 0.2)
+        plt.title(f"Top 10 Regions by Significance ({seed_val})\n{FIGURE_CONTEXT}", fontsize=10)
+        plt.gca().invert_yaxis()
         plt.grid(True, axis="x", alpha=0.3)
 
-        # Annotate bars with actual p-values
+        # annotate bars with actual p-values in the same x-scale
         for i, p in enumerate(top_10_regions["p_value"]):
-            plt.text(-np.log10(p) + 0.05, i, f"p={p:.3e}", va="center", fontsize=8)
+            x_text = min(p + 0.005, 0.19)
+            plt.text(x_text, i, f"p={p:.3e}", va="center", fontsize=8)
 
-        # Add legend for colors
         from matplotlib.patches import Patch
         legend_elements = [
-            Patch(facecolor='red', label='Ketamine Δ > Control Δ'),
-            Patch(facecolor='blue', label='Ketamine Δ < Control Δ')
+            Patch(facecolor="red", label="Ketamine Δ > Control Δ"),
+            Patch(facecolor="blue", label="Ketamine Δ < Control Δ"),
         ]
         plt.legend(handles=legend_elements, title="Group difference", loc="lower right")
 
         plt.tight_layout()
         output_path = os.path.join(OUTPUT_FOLDER, f"top10_between_group_{seed_val}.png")
-        plt.savefig(output_path, dpi=300, bbox_inches="tight")
+        plt.savefig(output_path, dpi=300)
         plt.show()
 
         print(f"Saved plot for {seed_val} to: {output_path}")
@@ -623,7 +654,7 @@ if __name__ == "__main__":
         print("No correlation matrices created. Check your data files.")
         raise SystemExit(1)
 
-    amygdala_correlations = extract_amygdala_correlations(correlation_matrices)
+    amygdala_correlations = extract_amygdala_correlations(filtered_correlation_matrices)
 
     if ANALYZE_BY_GROUP:
         between_group_results, had_groups = between_group_tests(
