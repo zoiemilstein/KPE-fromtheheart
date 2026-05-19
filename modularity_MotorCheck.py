@@ -1,21 +1,19 @@
 from pathlib import Path
-import re
+import kpe_config as cfg
 import numpy as np
 import pandas as pd
 import networkx as nx
 
+NO_GSR_DIR = cfg.ANATOMICAL_TS_DIR
+GSR_DIR = cfg.GLOBAL_TS_DIR
 
-NO_GSR_DIR = Path("/Users/zoiemilstein/רפואה/מעבדה/kpe/timeseries/anatomical")
-GSR_DIR    = Path("/Users/zoiemilstein/רפואה/מעבדה/kpe/timeseries/global")
+NO_GSR_SCRUB_CSV = cfg.ANATOMICAL_SCRUB_CSV
+GSR_SCRUB_CSV = cfg.GLOBAL_SCRUB_CSV
 
-NO_GSR_SCRUB_CSV = NO_GSR_DIR / "scrubbing_report_filtered.csv"
-GSR_SCRUB_CSV    = GSR_DIR / "scrubbing_report_filtered.csv"
+OUT_DIR = cfg.RESULTS_DIR / "motor_check_results"
+cfg.ensure_dir(OUT_DIR)
 
 ATLAS_TAG = "schaefer400"   # "schaefer400"
-
-OUT_DIR = Path("/Users/zoiemilstein/רפואה/מעבדה/kpe/qc_fc_dm_fc_results")
-OUT_DIR.mkdir(parents=True, exist_ok=True)
-
 ZERO_NEGATIVE_EDGES_FOR_MODULARITY = True
 
 
@@ -25,7 +23,7 @@ def get_timeseries_files(ts_dir: Path, atlas_tag: str):
         f for f in files
         if atlas_tag.lower() in f.name.lower()
         and "scrubbing_report" not in f.name.lower()
-        and "signal_metrics" not in f.name.lower()
+        and "motor_check_results" not in f.name.lower()
     ]
     return files
 
@@ -153,7 +151,8 @@ def compute_motor_lr_schaefer(ts_df: pd.DataFrame):
 
 def process_one_file(csv_path: Path, atlas_tag: str):
     ts_df = load_numeric_ts(csv_path)
-    meta = parse_file_metadata(csv_path.name)
+    meta = cfg.parse_entities(csv_path.name)
+    meta["file"] = csv_path.name
 
     row = {
         **meta,
@@ -203,11 +202,14 @@ def load_scrub_report(scrub_csv: Path):
         "high_motion_skip", "gsr_applied"
     ] if c in df.columns]
 
-    return df[keep_cols].copy()
+    df = df[keep_cols].copy()
+    df["task"] = "task-" + df["task"].astype(str).str.replace("task-", "", regex=False)
+
+    return df
 
 
 def build_metrics_for_dir(ts_dir: Path, scrub_csv: Path, atlas_tag: str, pipeline_name: str):
-    files = get_timeseries_files(ts_dir, atlas_tag)
+    files = cfg.find_ts_files(ts_dir, atlas_tag)
     rows = []
 
     for f in files:
@@ -253,7 +255,7 @@ def main():
             vals = combined.loc[combined["pipeline"] == pipeline, metric].dropna()
             print(f"{metric} | {pipeline}: mean={vals.mean():.3f}, std={vals.std():.3f}")
 
-    out_csv = OUT_DIR / f"signal_metrics_comparison_{ATLAS_TAG}.csv"
+    out_csv = OUT_DIR / f"motor_check_comparison_{ATLAS_TAG}.csv"
     combined.to_csv(out_csv, index=False)
 
     key_cols = ["subject", "session", "task", "run", "atlas_tag"]
@@ -277,7 +279,7 @@ def main():
             wide["motor_lr_corr_global"] - wide["motor_lr_corr_anatomical"]
         )
 
-    wide_csv = OUT_DIR / f"signal_metrics_comparison_{ATLAS_TAG}_wide.csv"
+    wide_csv = OUT_DIR / f"motor_check_comparison_{ATLAS_TAG}_wide.csv"
     wide.to_csv(wide_csv, index=False)
 
     print(f"\nSaved:\n{out_csv}\n{wide_csv}")

@@ -1,60 +1,26 @@
 #!/usr/bin/env python3
 
-import re
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from scipy import stats
 
-NO_GSR_DIR = Path("/Users/zoiemilstein/רפואה/מעבדה/kpe/timeseries/anatomical")
-GSR_DIR = Path("/Users/zoiemilstein/רפואה/מעבדה/kpe/timeseries/global")
+import kpe_config as cfg
 
-NO_GSR_SCRUB_CSV = NO_GSR_DIR / "scrubbing_report_filtered.csv"
-GSR_SCRUB_CSV = GSR_DIR / "scrubbing_report_filtered.csv"
+NO_GSR_DIR = cfg.ANATOMICAL_TS_DIR
+GSR_DIR = cfg.GLOBAL_TS_DIR
+NO_GSR_SCRUB_CSV = cfg.ANATOMICAL_SCRUB_CSV
+GSR_SCRUB_CSV = cfg.GLOBAL_SCRUB_CSV
+OUT_DIR = (cfg.RESULTS_DIR / "qc_fc_dm_fc_results")
 
 ATLAS_TAG = "schaefer400"         # "tian_s2" / "schaefer400"
-
-CENTROIDS_FILE = Path("/Users/zoiemilstein/רפואה/מעבדה/kpe/atlas_centroids/schaefer400_centroids.csv")
-
-OUT_DIR = Path("/Users/zoiemilstein/רפואה/מעבדה/kpe/qc_fc_dm_fc_results")
+CENTROIDS_FILE = ( cfg.BASE_DIR / "atlas_centroids" / "schaefer400_centroids.csv")
 
 # Motion column from scrubbing report
 FD_COLUMN = "fd_mean_filtered"      #fd_mean_raw   / fc_mean_filtered
 
 ALPHA = 0.05
-
-def ensure_dir(path: Path):
-    path.mkdir(parents=True, exist_ok=True)
-
-
-def parse_entities(filename: str):
-    """
-    Parse BIDS-like entities from timeseries filename.
-    Example:
-      sub-010_ses-MRI1_task-rest_run-1_schaefer400_ts.csv
-    """
-    out = {}
-    patterns = {
-        "subject": r"(sub-[A-Za-z0-9]+)",
-        "session": r"(ses-[A-Za-z0-9]+)",
-        "task": r"(task-[A-Za-z0-9]+)",
-        "run": r"(run-[A-Za-z0-9]+)",
-        "acq": r"(acq-[A-Za-z0-9]+)",
-    }
-    for key, pat in patterns.items():
-        m = re.search(pat, filename)
-        if m:
-            out[key] = m.group(1)
-    return out
-
-
-def discover_ts_files(root: Path, atlas_tag: str):
-    """
-    Find only time-series files for the requested atlas.
-    """
-    return sorted(root.rglob(f"*{atlas_tag}_ts.csv"))
-
 
 def read_timeseries_csv(path: Path, expected_nodes: int | None = None):
     """
@@ -208,7 +174,7 @@ def load_scrubbing_report(scrub_csv: Path, dataset_name: str, fd_column: str):
 # =========================================================
 
 def build_dataset_table(dataset_name: str, ts_root: Path, scrub_csv: Path, atlas_tag: str, fd_column: str):
-    ts_files = discover_ts_files(ts_root, atlas_tag)
+    ts_files = cfg.find_ts_files(ts_root, atlas_tag)
     if not ts_files:
         raise FileNotFoundError(f"No *{atlas_tag}_ts.csv files found in {ts_root}")
 
@@ -219,7 +185,7 @@ def build_dataset_table(dataset_name: str, ts_root: Path, scrub_csv: Path, atlas
     bad_files = []
 
     for ts_path in ts_files:
-        ent = parse_entities(ts_path.name)
+        ent = cfg.parse_entities(ts_path.name)
         if ent.get("subject") is None:
             bad_files.append((ts_path.name, "Could not parse subject"))
             continue
@@ -385,7 +351,7 @@ def compute_dm_fc(qc_fc_df: pd.DataFrame, edge_distances: np.ndarray, dataset_na
 # =========================================================
 
 def main():
-    ensure_dir(OUT_DIR)
+    cfg.ensure_dir(OUT_DIR)
 
     print(f"Running atlas: {ATLAS_TAG}")
     print(f"Using motion column: {FD_COLUMN}")
@@ -423,7 +389,7 @@ def main():
     all_df = pd.concat([no_gsr_df, gsr_df], ignore_index=True)
 
     run_out = OUT_DIR / f"{ATLAS_TAG}_{FD_COLUMN}"
-    ensure_dir(run_out)
+    cfg.ensure_dir(run_out)
     all_df.to_csv(run_out / "all_scan_level_edge_data.csv", index=False)
 
     all_qc_summaries = []
@@ -434,7 +400,7 @@ def main():
         qc_df, qc_summary = compute_qc_fc(all_df, dataset_name)
 
         ds_out = run_out / dataset_name
-        ensure_dir(ds_out)
+        cfg.ensure_dir(ds_out)
 
         qc_df.to_csv(ds_out / "edgewise_qc_fc.csv", index=False)
         qc_summary.to_csv(ds_out / "qc_fc_summary.csv", index=False)
