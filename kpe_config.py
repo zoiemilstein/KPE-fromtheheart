@@ -3,16 +3,22 @@ import re
 
 
 BASE_DIR = Path("/Users/zoiemilstein/רפואה/מעבדה/kpe")
+
+TAU_DIR = BASE_DIR / "timeseries"
+YALE_DIR = BASE_DIR / "Yale-results-3sessons (1)"
+
+
+
 if not BASE_DIR.exists():
-    raise FileNotFoundError(f"BASE_DIR does not exist: {BASE_DIR}")
+    raise FileNotError(f"BASE_DIR does not exist: {BASE_DIR}")
 
-TIMESERIES_DIR = BASE_DIR / "timeseries"
+if not TAU_DIR.exists():
+    raise FileNotFoundError(f"TAU_DIR does not exist: {TAU_DIR}")
 
-ANATOMICAL_TS_DIR = TIMESERIES_DIR / "anatomical"
-GLOBAL_TS_DIR = TIMESERIES_DIR / "global"
+if not YALE_DIR.exists():
+    raise FileNotFoundError(f"YALE_DIR does not exist: {YALE_DIR}")
 
-ANATOMICAL_SCRUB_CSV = ANATOMICAL_TS_DIR / "scrubbing_report_filtered.csv"
-GLOBAL_SCRUB_CSV = GLOBAL_TS_DIR / "scrubbing_report_filtered.csv"
+
 
 OUTPUT_DATA_DIR = BASE_DIR / "output_data"
 RESULTS_DIR = BASE_DIR / "results"
@@ -22,7 +28,6 @@ def ensure_dir(path: Path):
 
 
 def parse_entities(filename: str):
-
     parsed_dict = {}
 
     patterns = {
@@ -35,7 +40,6 @@ def parse_entities(filename: str):
 
     for key, pat in patterns.items():
         m = re.search(pat, filename)
-
         if m:
             parsed_dict[key] = m.group(1)
 
@@ -43,7 +47,57 @@ def parse_entities(filename: str):
 
 
 def find_ts_files(root: Path, atlas_tag: str):
-
     return sorted(
         root.rglob(f"*{atlas_tag}_ts.csv")
     )
+
+
+def find_randomization_file(root: Path):
+    """
+    Finds the first Excel randomization table under a dataset folder.
+    The file name must contain the word 'randomization'.
+    """
+
+    files = sorted(
+        f for f in root.rglob("*.xlsx")
+        if "randomization" in f.name.lower()
+    )
+
+    if not files:
+        raise FileNotFoundError(
+            f"No randomization Excel file found under: {root}\n"
+            f"Expected an .xlsx file with 'randomization' in the filename."
+        )
+
+    if len(files) > 1:
+        print("\nWARNING: More than one randomization file found:")
+        for f in files:
+            print(f"  {f}")
+        print(f"\nUsing first one:\n  {files[0]}")
+
+    return files[0]
+
+
+DATASETS = {
+    "tau": {
+        "root": TAU_DIR,
+        "anatomical": TAU_DIR / "anatomical",
+        "global": TAU_DIR / "global",
+        "anatomical_scrub": TAU_DIR / "anatomical" / "scrubbing_report_filtered.csv",
+        "global_scrub": TAU_DIR / "global" / "scrubbing_report_filtered.csv",
+        "randomization": find_randomization_file(TAU_DIR),
+    },
+
+    "yale": {
+        "root": YALE_DIR,
+        "anatomical": YALE_DIR / "anatomical",
+        "global": YALE_DIR / "global",
+        "anatomical_scrub": YALE_DIR / "anatomical" / "scrubbing_report_filtered.csv",
+        "global_scrub": YALE_DIR / "global" / "scrubbing_report_filtered.csv",
+        "randomization": find_randomization_file(YALE_DIR),
+    },
+}
+
+
+# Optional alias specifically for Schaefer scripts
+SCHAEFER_DATASETS = DATASETS
